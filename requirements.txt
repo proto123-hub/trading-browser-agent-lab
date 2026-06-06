@@ -1,0 +1,8 @@
+# P1 Framework Backtest Lab — Phase 1 dependencies (research-only)
+numpy>=1.24
+pandas>=2.0
+# Live data source (optional; needs network egress to Yahoo Finance).
+# The default pipeline runs offline on the synthetic source without this.
+yfinance>=0.2.40
+# Test/dev
+pytest>=7.4
