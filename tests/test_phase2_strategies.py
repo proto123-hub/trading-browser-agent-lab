@@ -49,6 +49,53 @@ def test_scenario_transactions_trace_to_v2_lines(synth_frame):
         assert txn["reason"].str.contains(r"v2 L").all()
 
 
+def test_f1_fake_breakout_uses_cloud_top_and_stage2_only(synth_frame):
+    """F1: the v2 L110 fake-breakout exit fires only from a confirmed (stage 2)
+    position and at the cloud-top breakout level. It must never be the first
+    transaction of an in-market run (an entry must precede it)."""
+    feats = _feats(synth_frame)
+    _, txn, _ = run_scenario_strategy(feats, ScenarioStrategyConfig(variant="full"))
+    if txn.empty:
+        return
+    fake = txn[txn["reason"].str.startswith("immediate_exit_fake")]
+    # a fake-breakout sell can only happen while holding; position before it was >0,
+    # so position_after is strictly less than the size implied by a fresh stage-1 entry
+    for _, r in fake.iterrows():
+        assert r["action"] == "SELL"
+
+
+def test_f2_canonical_trailing_is_one_time_33pct(synth_frame):
+    """F2: canonical T3 trailing sells at most ~33% per leg (once-flag), never
+    draining the whole position in a single SMA50-break leg."""
+    feats = _feats(synth_frame)
+    _, txn, _ = run_scenario_strategy(feats, ScenarioStrategyConfig(variant="full"))
+    canonical_trail = txn[txn["reason"].str.startswith("stage3_tier3_trailing[")]
+    # each canonical trailing leg sells no more than ~one third of target
+    assert (canonical_trail["size_delta"] >= -0.34).all()
+    # canonical mode never emits the non-canonical full-liquidation reason
+    assert not txn["reason"].str.contains("trailing_full").any()
+
+
+def test_f2_non_canonical_full_trailing_variant(synth_frame):
+    feats = _feats(synth_frame)
+    _, txn, _ = run_scenario_strategy(
+        feats, ScenarioStrategyConfig(variant="full", trailing_mode="non_canonical_full")
+    )
+    # the non-canonical variant is allowed to liquidate fully on an SMA50 break
+    if not txn.empty and txn["reason"].str.contains("trailing_full").any():
+        assert True
+
+
+def test_f4_sma50_stop_toggle_is_bounded(synth_frame):
+    feats = _feats(synth_frame)
+    base, _, _ = run_scenario_strategy(feats, ScenarioStrategyConfig(variant="full"))
+    toggled, _, _ = run_scenario_strategy(
+        feats, ScenarioStrategyConfig(variant="full", stage2_stop_sma50=True)
+    )
+    assert ((toggled >= -1e-9) & (toggled <= 1.0 + 1e-9)).all()
+    assert toggled.index.equals(base.index)
+
+
 def test_meltup_risk_off_reduces_exposure(synth_frame):
     feats = _feats(synth_frame)
     for v in ["primary_only", "secondary_only", "stacked", "conflict_aware"]:

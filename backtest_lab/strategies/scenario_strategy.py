@@ -54,6 +54,8 @@ class ScenarioStrategyConfig:
     tier2_gain: float = 0.35
     tier_fraction: float = 1.0 / 3.0      # 33/33/33 (v2 L98)
     immediate_below_days: int = 2         # v2 L109
+    trailing_mode: str = "canonical_once"  # canonical_once | non_canonical_full (F2)
+    stage2_stop_sma50: bool = False       # add SMA50-break to Stage 2 stop (v2 L93 "or", F4)
     b_approach: float = 0.03              # cloud-bottom -3% approach (v2 L115)
     b_rsi_max: float = 50.0
     b_reduce: float = 1.0 / 3.0
@@ -68,6 +70,7 @@ class _State:
     stop_price: float = 0.0
     t1: bool = False
     t2: bool = False
+    t3: bool = False
     last_c_date: pd.Timestamp | None = None
 
 
@@ -103,7 +106,7 @@ def run_scenario_strategy(
         if st.size <= 1e-9:
             st.size = 0.0
             st.stage = 0
-            st.t1 = st.t2 = False
+            st.t1 = st.t2 = st.t3 = False
 
     for date in idx:
         row = feats.loc[date]
@@ -130,16 +133,23 @@ def run_scenario_strategy(
 
         if st.size > 0:
             # --- 1. Immediate exits (override all holds) ---
-            # high-volume bearish breakdown below breakout level -> sell 100%
-            if (vol_mult >= cfg.stage2_vol_min and close < row["open"]
-                    and st.stage2_entry and close < st.stage2_entry):
+            # F1: v2 L110 fake-breakout = high-volume bearish candle whose close
+            # is back below the *breakout level* (cloud top), and only after a
+            # confirmed breakthrough (stage 2). Stage-1 accumulation is protected
+            # by its own SMA200 -7% stop, not by this rule.
+            if (st.stage == 2 and vol_mult >= cfg.stage2_vol_min and close < row["open"]
+                    and pd.notna(cloud_top) and close < cloud_top):
                 sell_fraction(date, 1.0, close, "immediate_exit_fake[v2 L110]")
             # close below cloud top for >= N sessions -> sell 50%
             elif below_top_streak >= cfg.immediate_below_days:
                 sell_fraction(date, 0.5, close, "immediate_exit_2day_below[v2 L109]")
 
-            # --- 2. Stop loss ---
-            if st.size > 0 and st.stop_price and close < st.stop_price:
+            # --- 2. Stop loss (F4: optional SMA50-break alternative, v2 L93) ---
+            stop_hit = bool(st.stop_price) and close < st.stop_price
+            if (cfg.stage2_stop_sma50 and st.stage == 2
+                    and pd.notna(sma50) and close < sma50):
+                stop_hit = True
+            if st.size > 0 and stop_hit:
                 sell_fraction(date, 1.0, close, "stop_loss[v2 L80/L93]")
 
             # --- 3. Scenario B ladder (bullish-cloud breakdown) ---
@@ -155,9 +165,16 @@ def run_scenario_strategy(
 
             # --- 4. Stage 3 tiers (only with the full / stage2 engines) ---
             if st.size > 0 and cfg.variant != "stage1_only" and st.stage == 2:
-                # T3 trailing first: SMA50 close break -> trailing exit
+                # T3 trailing: SMA50 close break. F2: canonical is a one-time 33%
+                # trailing exit (v2 L104/L111), guarded by a once-flag. The
+                # full-liquidation behaviour is kept as a labelled non-canonical
+                # variant for comparison.
                 if pd.notna(sma50) and close < sma50:
-                    sell_fraction(date, cfg.tier_fraction, close, "stage3_tier3_trailing[v2 L104/L111]")
+                    if cfg.trailing_mode == "non_canonical_full":
+                        sell_fraction(date, 1.0, close, "stage3_tier3_trailing_full[non-canonical]")
+                    elif not st.t3:
+                        st.t3 = True
+                        sell_fraction(date, cfg.tier_fraction, close, "stage3_tier3_trailing[v2 L104/L111]")
                 if st.size > 0 and not st.t1 and (
                     rsi >= cfg.tier1_rsi or close >= st.stage2_entry * (1 + cfg.tier1_gain)
                 ):

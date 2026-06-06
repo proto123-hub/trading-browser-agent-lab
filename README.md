@@ -19,6 +19,11 @@ python run.py                      # offline synthetic source (default)
 pytest -q                          # unit tests
 ```
 
+> **Reproducibility:** `requirements.txt` pins `numpy==2.2.6` / `pandas==2.3.3`.
+> Rolling-indicator float results (Wilder RSI/ATR, Bollinger) differ slightly
+> across library builds, enough to flip a threshold-crossing signal by a row or
+> two; pinning keeps runs byte-reproducible across environments.
+
 The default run uses a deterministic **synthetic** data source so the full
 pipeline and tests run with no network. For live daily bars:
 

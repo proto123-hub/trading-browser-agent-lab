@@ -1,6 +1,10 @@
-# P1 Framework Backtest Lab — Phase 1 dependencies (research-only)
-numpy>=1.24
-pandas>=2.0
+# P1 Framework Backtest Lab — Phase 1/2 dependencies (research-only)
+# Pinned for cross-environment reproducibility (F5): rolling-indicator float
+# results (Wilder RSI/ATR, Bollinger) differ enough across numpy/pandas builds
+# to flip threshold-crossing signals by a row or two. Pinned to the review
+# environment so Code and Cowork runs are byte-reproducible.
+numpy==2.2.6
+pandas==2.3.3
 pyyaml>=6.0
 # Live data source (optional; needs network egress to Yahoo Finance).
 # The default pipeline runs offline on the synthetic source without this.

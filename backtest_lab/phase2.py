@@ -66,6 +66,19 @@ def run_symbol_variants(
             txn = txn.assign(symbol=symbol, strategy=f"scenario_{v}")
             trades.extend(txn.to_dict("records"))
 
+    # comparison variants: non-canonical full-liquidation trailing (F2) and the
+    # optional SMA50-break Stage 2 stop (F4).
+    for label, scfg in [
+        ("scenario_full_trailfull_noncanonical",
+         ScenarioStrategyConfig(variant="full", trailing_mode="non_canonical_full")),
+        ("scenario_full_sma50stop",
+         ScenarioStrategyConfig(variant="full", stage2_stop_sma50=True)),
+    ]:
+        pos, txn, sig = run_scenario_strategy(feats, scfg)
+        add(label, pos, sig)
+        if not txn.empty:
+            trades.extend(txn.assign(symbol=symbol, strategy=label).to_dict("records"))
+
     # 2. Melt-Up overlays (4 variants + earnings blackout on primary)
     for v in MELTUP_VARIANTS:
         pos, sig = run_meltup_overlay(feats, MeltUpConfig(variant=v))
