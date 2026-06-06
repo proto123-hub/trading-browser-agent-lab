@@ -31,11 +31,17 @@ import pandas as pd
 class ScenarioConfig:
     confirm_days: int = 2          # 2 consecutive daily closes (v2 L41, L88)
     fake_vol_mult: float = 1.0     # attempt volume below 20d avg => fake (v2 L50)
+    b_lookback_above: int = 5      # "price previously above" window for B (N2)
+
+
+def _mask(cond: pd.Series) -> pd.Series:
+    """NaN-safe boolean mask (avoids object-dtype fillna downcasting)."""
+    return cond.astype("boolean").fillna(False).astype(bool)
 
 
 def consecutive(cond: pd.Series, n: int) -> pd.Series:
     """True at bar T iff ``cond`` is True for each of the last ``n`` bars."""
-    c = cond.fillna(False).astype("float64")
+    c = _mask(cond).astype("float64")
     return c.rolling(n).sum().eq(float(n))
 
 
@@ -46,33 +52,44 @@ def label_scenarios(
     cfg = config or ScenarioConfig()
     n = cfg.confirm_days
 
-    above = feats["above_cloud"].fillna(False)
-    below = feats["below_cloud"].fillna(False)
-    in_cloud = feats["in_cloud"].fillna(False)
-    bearish = feats["bearish_cloud"].fillna(False)
-    bullish = feats["bullish_cloud"].fillna(False)
+    above = _mask(feats["above_cloud"])
+    below = _mask(feats["below_cloud"])
+    in_cloud = _mask(feats["in_cloud"])
+    bearish = _mask(feats["bearish_cloud"])
+    bullish = _mask(feats["bullish_cloud"])
 
     # --- Scenario A: bearish-cloud breakthrough, 2-day close hold above top ---
-    held_above = consecutive(above, n)
+    held_above = _mask(consecutive(above, n))
     # the bar before the n-day window was not above the cloud (genuine entry)
-    pre_not_above = ~above.shift(n).fillna(False)
+    pre_not_above = ~_mask(above.shift(n))
     # cloud was bearish going into the breakout
-    pre_bearish = bearish.shift(n).fillna(False)
-    scenario_a = held_above.fillna(False) & pre_not_above & pre_bearish
+    pre_bearish = _mask(bearish.shift(n))
+    scenario_a = held_above & pre_not_above & pre_bearish
 
     # --- Scenario B: bullish-cloud breakdown, 2-day close hold below bottom ---
-    held_below = consecutive(below, n)
-    pre_not_below = ~below.shift(n).fillna(False)
-    pre_bullish = bullish.shift(n).fillna(False)
-    pre_above = above.shift(n).fillna(False)  # price previously above cloud
-    scenario_b = held_below.fillna(False) & pre_not_below & pre_bullish & pre_above
+    held_below = _mask(consecutive(below, n))
+    pre_not_below = ~_mask(below.shift(n))
+    pre_bullish = _mask(bullish.shift(n))
+    # N2: "price previously above" relaxed to any above-cloud bar within the
+    # last `b_lookback_above` bars before the breakdown window (cloud crossings
+    # can take >2 sessions, which the strict T-n test would never catch).
+    prior_above = (
+        above.astype("float64").shift(n)
+        .rolling(cfg.b_lookback_above, min_periods=1).max()
+    )
+    pre_above = _mask(prior_above > 0)
+    scenario_b = held_below & pre_not_below & pre_bullish & pre_above
 
-    # --- Scenario C: failed breakthrough (above bearish cloud, then back in) ---
-    prev_above_bearish = (above.shift(1) & bearish.shift(1)).fillna(False)
-    scenario_c = prev_above_bearish & in_cloud
+    # --- Scenario C: failed breakthrough (one close above, then back inside) ---
+    # v2 L49: a *single* close above the bearish-cloud top, then re-entry the
+    # next day. Require the attempt to be exactly one bar above (~above.shift(2)):
+    # a 2-day hold is Scenario A, and a later re-entry after a confirmed
+    # breakthrough is an immediate-exit case (v2 L109), not a failed breakout.
+    single_above_attempt = above.shift(1) & ~_mask(above.shift(2)) & bearish.shift(1)
+    scenario_c = _mask(single_above_attempt) & in_cloud
     # fake-breakout sub-label: the attempt bar's volume was below 20d average
     attempt_vol_mult = feats["vol_mult"].shift(1)
-    scenario_c_fake = scenario_c & (attempt_vol_mult < cfg.fake_vol_mult).fillna(False)
+    scenario_c_fake = scenario_c & _mask(attempt_vol_mult < cfg.fake_vol_mult)
 
     # --- Scenario D: bullish-cloud continuation ---
     scenario_d = above & bullish

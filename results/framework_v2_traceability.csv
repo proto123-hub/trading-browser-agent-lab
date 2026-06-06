@@ -9,10 +9,10 @@ scenario_d_continuation,44,44,verified,price above bullish cloud = HOLD/accumula
 scenario_c_detail,48,51,verified,1-day above then re-entry; sub-volume => fake breakout
 scenario_c_fake_volume,50,50,verified,attempt volume below 20d average => fake breakout
 rebreakthrough_five_checks,54,60,verified,support/volume/cloud-thinning/RSI-divergence/Tenkan>Kijun
-rebreakthrough_check_support,56,56,verified,vol-confirmed bullish candle at SMA50/200 after 3-5d base
+rebreakthrough_check_support,56,56,proxy,vol-confirmed bullish candle at SMA50/200 after 3-5d base | PROXY: canonical requires a volume-confirmed bullish candle after 3-5 sessions of consolidation at SMA50/200; code checks close>=SMA50/200 with vol_mult>=1.0 only (no candle/consolidation-window test)
 rebreakthrough_check_volume,57,57,verified,2nd-attempt volume >= +30% vs first attempt
 rebreakthrough_check_cloud,58,58,verified,cloud thickness >= 20% smaller than first attempt
-rebreakthrough_check_divergence,59,59,verified,price low >= first-fail low while RSI higher
+rebreakthrough_check_divergence,59,59,proxy,price low >= first-fail low while RSI higher | PROXY: canonical compares the second-attempt price *low* vs the first-failure low; code uses close as a stand-in for the low
 rebreakthrough_check_tenkan_kijun,60,60,verified,Tenkan > Kijun
 rebreakthrough_score_full,62,62,verified,>=4/5 => stronger LONG than first attempt
 rebreakthrough_score_half,63,63,verified,<=3/5 => max 50% sizing

@@ -62,6 +62,20 @@ def test_single_close_above_does_not_fire_a_but_fires_c():
     assert labels["scenario_c"].iloc[5]   # back inside the bar after the attempt
 
 
+def test_confirmed_breakthrough_reentry_is_not_scenario_c():
+    """N1: a 2-day confirmed breakthrough (A) followed by re-entry into the
+    cloud must NOT be labelled a failed breakout (C). Only a *single* close
+    above, then re-entry, is C (v2 L49); post-confirmation re-entry is an
+    immediate-exit case (v2 L109)."""
+    above = [False, False, False, True, True, False]   # 2-day hold then back in
+    bearish = [True] * 6
+    feats = _feats(above, bearish)
+    labels = label_scenarios(feats)
+    assert labels["scenario_a"].iloc[4]        # breakthrough confirmed on 2nd close
+    assert not labels["scenario_c"].iloc[5]    # re-entry is NOT a failed breakout
+    assert not labels["scenario_c"].any()
+
+
 def test_scenario_c_fake_when_low_volume():
     above = [False, False, False, True, False, False]
     bearish = [True] * 6

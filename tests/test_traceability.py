@@ -1,16 +1,27 @@
 from __future__ import annotations
 
-from backtest_lab.traceability import build_traceability, MAPPING, write_traceability
+from backtest_lab.traceability import (
+    build_traceability,
+    MAPPING,
+    PROXY_RULES,
+    write_traceability,
+)
 
 
-def test_all_mappings_verified():
+def test_all_mappings_verified_or_proxy():
     df = build_traceability()
     assert len(df) == len(MAPPING)
     assert list(df.columns) == [
         "spec_rule", "framework_v2_line_start", "framework_v2_line_end", "status", "notes",
     ]
-    # every canonical rule must map to a real, non-empty line range
-    assert (df["status"] == "verified").all(), df[df["status"] != "verified"]
+    # every canonical rule maps to a real line range: verified, or an explicitly
+    # documented proxy (N3) -- never out_of_range/empty_range.
+    assert df["status"].isin(["verified", "proxy"]).all(), df[~df["status"].isin(["verified", "proxy"])]
+    proxy_rows = set(df.loc[df["status"] == "proxy", "spec_rule"])
+    assert proxy_rows == set(PROXY_RULES)
+    # proxy rows must carry the deviation note
+    for _, r in df[df["status"] == "proxy"].iterrows():
+        assert "PROXY" in r["notes"]
 
 
 def test_line_ranges_in_bounds():

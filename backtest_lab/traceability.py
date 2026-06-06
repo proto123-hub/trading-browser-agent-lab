@@ -16,6 +16,20 @@ import pandas as pd
 
 from .integrity import assert_framework_source, _repo_root, FRAMEWORK_V2_RELPATH
 
+# Rules whose code implementation is a documented proxy, not a faithful
+# encoding of the canonical text (N3). Marked status="proxy" with the deviation.
+PROXY_RULES: dict[str, str] = {
+    "rebreakthrough_check_support": (
+        "PROXY: canonical requires a volume-confirmed bullish candle after 3-5 "
+        "sessions of consolidation at SMA50/200; code checks close>=SMA50/200 "
+        "with vol_mult>=1.0 only (no candle/consolidation-window test)"
+    ),
+    "rebreakthrough_check_divergence": (
+        "PROXY: canonical compares the second-attempt price *low* vs the "
+        "first-failure low; code uses close as a stand-in for the low"
+    ),
+}
+
 # (spec_rule, framework_v2_line_start, framework_v2_line_end, notes)
 # Line numbers reference the 310-line framework v2 source.
 MAPPING: list[tuple[str, int, int, str]] = [
@@ -91,6 +105,9 @@ def build_traceability(framework_path: str | Path | None = None) -> pd.DataFrame
         else:
             snippet = "".join(lines[start - 1 : end]).strip()
             status = "verified" if snippet else "empty_range"
+        if spec_rule in PROXY_RULES and status == "verified":
+            status = "proxy"
+            notes = f"{notes} | {PROXY_RULES[spec_rule]}"
         rows.append(
             {
                 "spec_rule": spec_rule,
