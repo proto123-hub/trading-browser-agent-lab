@@ -49,12 +49,30 @@ def run_symbol_variants(
     fwd: list[dict] = []
     close = frame["close"]
 
-    def add(name, pos, signal=None):
+    def _position_trades(name, pos):
+        """Derive verifiable trade legs from a position series (R2a): every
+        change in exposure is a BUY/SELL leg priced at that bar's close."""
+        p = pos.reindex(close.index).fillna(0.0)
+        delta = p.diff().fillna(p)
+        legs = []
+        for date in close.index[delta.ne(0.0).to_numpy()]:
+            d = float(delta[date])
+            legs.append({
+                "date": date, "action": "BUY" if d > 0 else "SELL",
+                "size_delta": round(d, 6), "price": float(close[date]),
+                "reason": "position_change", "position_after": round(float(p[date]), 6),
+                "symbol": symbol, "strategy": name,
+            })
+        return legs
+
+    def add(name, pos, signal=None, log_trades=False):
         res = backtest_positions(frame, pos, exec_cfg)
         summary.append({"symbol": symbol, "strategy": name, **res.metrics})
         if signal is not None and signal.any():
             fr = signal_forward_returns(close, signal, symbol, name)
             fwd.extend(fr.to_dict("records"))
+        if log_trades:
+            trades.extend(_position_trades(name, pos))
 
     # 1. canonical scenario A-D (3 variants)
     scenario_positions = {}
@@ -82,16 +100,16 @@ def run_symbol_variants(
     # 2. Melt-Up overlays (4 variants + earnings blackout on primary)
     for v in MELTUP_VARIANTS:
         pos, sig = run_meltup_overlay(feats, MeltUpConfig(variant=v))
-        add(f"meltup_{v}", pos, sig)
+        add(f"meltup_{v}", pos, sig, log_trades=True)
     pos, sig = run_meltup_overlay(
         feats, MeltUpConfig(variant="primary_only", earnings_blackout=True)
     )
-    add("meltup_primary_only_blackout", pos, sig)
+    add("meltup_primary_only_blackout", pos, sig, log_trades=True)
 
     # 3. MU $950 tier strategy (8 variants)
     for v in TIER950_VARIANTS:
         pos, sig = run_tier950_strategy(feats, Tier950Config(mode=v))
-        add(f"tier950_{v}", pos, sig)
+        add(f"tier950_{v}", pos, sig, log_trades=True)
 
     # 4. ATH breadth filter on scenario_full and buy&hold
     if compression_by_window:
@@ -108,6 +126,6 @@ def run_symbol_variants(
         pos, sig = run_tiered_profit_strategy(
             feats, TieredProfitConfig(trigger_mode=trig, remainder_mode=rem)
         )
-        add(f"tiered_{trig}_{rem}", pos, sig)
+        add(f"tiered_{trig}_{rem}", pos, sig, log_trades=True)
 
     return summary, trades, fwd

@@ -87,3 +87,26 @@ def test_events_has_june5_stress():
     events = load_events("events.yaml")
     mu = events_for(events, "MU")
     assert any(str(e.date.date()) == "2026-06-05" for e in mu)
+
+
+def test_relaxed_meltup_column_present():
+    from backtest_lab.features.meltup import meltup_features
+    ds = CSVCacheAdapter().fetch("MU", "2019-01-02", "2026-06-05")
+    mf = meltup_features(ds.frame)
+    assert "mu_relaxed_primary" in mf.columns
+    assert mf["mu_relaxed_primary"].dtype == bool
+
+
+def test_exploratory_relaxed_catches_mu_june5():
+    """R4: the non-canonical relaxed primary should catch MU 2026-06-05 where the
+    canonical primary does not (the gap that motivated the exploratory variant)."""
+    from backtest_lab.phase3 import _meltup_exploratory
+    from backtest_lab.data import load_universe
+    from backtest_lab.config import UNIVERSE
+    datasets = load_universe(list(UNIVERSE), "2019-01-02", "2026-06-05",
+                             source="csv", cache_dir=None)
+    ex = _meltup_exploratory(datasets)
+    assert ex["catch"]["canonical_caught"] is False
+    assert ex["catch"]["relaxed_caught"] is True
+    # relaxed adds signals (false-positive cost is real and reported)
+    assert ex["total_relaxed"] >= 1

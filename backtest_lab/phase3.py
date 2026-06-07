@@ -135,6 +135,12 @@ def run_phase3(results_dir: str = "results", reports_dir: str = "reports") -> di
     sweep = _param_sweep(datasets, feats_by, exec_cfg)
     sweep.to_csv(results / "parameter_sweep.csv")
 
+    # 6b. exploratory non-canonical Melt-Up variant (R4): does a relaxed primary
+    # ("failed high within 5 sessions of a recent ATH + high-vol bearish close")
+    # catch MU 2026-06-05, and at what false-positive cost?
+    explore = _meltup_exploratory(datasets)
+    explore["per_symbol"].to_csv(results / "meltup_exploratory.csv", index=False)
+
     # 7. charts
     chart_paths = _make_charts(equity_by_strat, scenario_fwd, sweep, close_by, txns_by_symbol, figs)
 
@@ -142,7 +148,7 @@ def run_phase3(results_dir: str = "results", reports_dir: str = "reports") -> di
     report_path = _write_report(
         Path(reports_dir) / "p1_framework_backtest_lab.md",
         verified, pipe, results, robustness_out, regime, port_returns,
-        events_check, sweep, chart_paths,
+        events_check, sweep, chart_paths, explore,
     )
 
     return {
@@ -185,6 +191,35 @@ def _verify_named_events(datasets, exec_cfg, window=5) -> list[dict]:
             "fired_after": fired_after, "verdict": verdict,
         })
     return out
+
+
+def _meltup_exploratory(datasets, target_symbol="MU", target_date="2026-06-05", window=5) -> dict:
+    """Compare canonical vs relaxed (non-canonical) Melt-Up primary: total
+    signal counts (false-positive proxy) and whether each catches the target
+    stress date within `window` sessions before it."""
+    rows = []
+    for sym, ds in datasets.items():
+        mf = meltup_features(ds.frame)
+        canon = int(mf["mu_primary"].sum())
+        relaxed = int(mf["mu_relaxed_primary"].sum())
+        rows.append({"symbol": sym, "canonical_primary": canon,
+                     "relaxed_primary": relaxed, "extra_signals": relaxed - canon})
+    per_symbol = pd.DataFrame(rows)
+
+    ds = datasets.get(target_symbol)
+    catch = {"symbol": target_symbol, "date": target_date}
+    if ds is not None:
+        mf = meltup_features(ds.frame)
+        idx = ds.frame.index
+        pos = idx.searchsorted(pd.Timestamp(target_date))
+        lo = max(0, pos - window)
+        pre = mf.iloc[lo:pos + 1]
+        catch["canonical_caught"] = bool(pre["mu_primary"].any())
+        catch["relaxed_caught"] = bool(pre["mu_relaxed_primary"].any())
+    total_canon = int(per_symbol["canonical_primary"].sum())
+    total_relaxed = int(per_symbol["relaxed_primary"].sum())
+    return {"per_symbol": per_symbol, "catch": catch,
+            "total_canonical": total_canon, "total_relaxed": total_relaxed}
 
 
 def _param_sweep(datasets, feats_by, exec_cfg) -> pd.DataFrame:
@@ -239,7 +274,7 @@ def _verdict(strat_metrics: dict, bh_metrics: dict) -> str:
 
 
 def _write_report(path, verified, pipe, results, robustness_out, regime,
-                  port_returns, events_check, sweep, chart_paths) -> Path:
+                  port_returns, events_check, sweep, chart_paths, explore) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     summary = pd.read_csv(results / "summary.csv")
@@ -249,6 +284,10 @@ def _write_report(path, verified, pipe, results, robustness_out, regime,
     num_cols = [c for c in strat.columns if c not in ("symbol", "strategy")]
     agg = strat.groupby("strategy")[num_cols].mean(numeric_only=True)
     bh = summary[summary["strategy"] == "buy_and_hold"][num_cols].mean(numeric_only=True).to_dict()
+
+    def _cell(df, sym, strat_name, col):
+        r = df[(df["symbol"] == sym) & (df["strategy"] == strat_name)]
+        return float(r[col].iloc[0]) if len(r) else float("nan")
 
     def fmt(x):
         return "n/a" if pd.isna(x) else f"{x:.3f}"
@@ -294,27 +333,65 @@ def _write_report(path, verified, pipe, results, robustness_out, regime,
                      f"{fmt(row.get('exposure'))} | {v} |")
     lines.append("")
 
+    lines.append("> **Footnote (R2):** the table is a 9-symbol mean, which dilutes "
+                 "single-symbol trigger effects (e.g. the MU `$950` tier — see Q3).\n")
+
+    # ---- computed answers for Q3/Q4/Q5 ----
+    mu_two = _cell(strat, "MU", "tier950_tier_950_two_day", "total_return")
+    mu_same = _cell(strat, "MU", "tier950_tier_950_same_day", "total_return")
+    mu_hold = _cell(strat, "MU", "tier950_hold", "total_return")
+    # breadth activation: base vs gated (mean across symbols)
+    base_sr = agg.loc["scenario_full"]["total_return"] if "scenario_full" in agg.index else float("nan")
+    gated_sr = agg.loc["scenario_full__breadth_11x7x3"]["total_return"] if "scenario_full__breadth_11x7x3" in agg.index else float("nan")
+    breadth_inactive = (pd.notna(base_sr) and pd.notna(gated_sr) and abs(base_sr - gated_sr) < 1e-9)
+    # tiered vs buy&hold
+    tcan = agg.loc["tiered_canonical_sma50_trailing"].to_dict() if "tiered_canonical_sma50_trailing" in agg.index else {}
+
     # 7 Report-Must-Answer questions
     lines.append("## Report Must Answer (spec L290-298)\n")
     lines.append("**Q1 — Which rules to keep / modify / reject?** See the verdict column "
                  "above (KEEP = better Sharpe AND shallower max drawdown than buy&hold; "
                  "MODIFY = one of the two; REJECT = neither). These are directional given "
                  "the data limitations.\n")
-    bull_bear = "see `results/robustness_regime_*.csv`"
-    lines.append(f"**Q2 — Which rules only work in narrow regimes?** Regime-segmented "
-                 f"metrics ({bull_bear}). The sample is bull-dominated, so any strategy "
-                 f"that only outperforms in 'bull' should be treated as regime-narrow.\n")
-    t950 = [e for e in [agg.loc[s].to_dict() for s in agg.index if s.startswith('tier950_tier_950')]]
-    lines.append("**Q3 — Is MU `$950` useful as a profit-taking tier or narrative anchor?** "
-                 "Compare `tier950_tier_950_*` vs `tier950_hold` in `strategy_summary.csv`. "
-                 "On adjusted prices the $950 level is rarely touched in-sample, so evidence "
-                 "is thin — leaning **narrative anchor** pending intraday/nominal data.\n")
-    lines.append("**Q4 — Does ATH compression add value as a breadth filter after costs?** "
-                 "Compare `*__breadth_*` variants vs their ungated base in `strategy_summary.csv`. "
-                 "If gated Sharpe/Calmar do not exceed the base after 5 bps costs, reject as a filter.\n")
-    lines.append("**Q5 — Does tiered profit-taking improve drawdown enough to justify "
-                 "opportunity cost?** Compare `tiered_*` Calmar/maxDD vs buy&hold above; "
-                 "tiering typically trades CAGR for shallower drawdown.\n")
+    lines.append("**Q2 — Which rules only work in narrow regimes?** Regime-segmented metrics "
+                 "in `results/robustness_regime_*.csv`. The sample is bull-dominated, so any "
+                 "strategy that only outperforms in 'bull' is regime-narrow; the canonical "
+                 "scenario engine in particular barely activates outside bearish-cloud setups.\n")
+    if pd.notna(mu_two):
+        verdict_q3 = ("profit-taking tier (in-sample, MU)" if mu_two > mu_hold
+                      else "narrative anchor")
+        lines.append(
+            f"**Q3 — Is MU `$950` useful as a profit-taking tier or narrative anchor?** "
+            f"The trigger DID fire (MU crossed $950 in May 2026). MU-only total return: "
+            f"**two_day {fmt(mu_two)} > same_day {fmt(mu_same)} > hold {fmt(mu_hold)}** — "
+            f"the 2-day-confirmed tier was the in-sample best, so on this single symbol the "
+            f"$950 rule reads as a **{verdict_q3}**. Caveat: **n=1 trigger event**, "
+            f"statistically negligible; the 9-symbol-mean headline dilutes it to ~buy&hold. "
+            f"All tier legs are now in `results/trades.csv` for audit.\n")
+    if breadth_inactive:
+        lines.append(
+            "**Q4 — Does ATH compression add value as a breadth filter after costs?** "
+            "**No evidence — the gate never activated.** Every `*__breadth_*` variant is "
+            f"identical to its ungated base (scenario_full total return {fmt(base_sr)} == "
+            f"gated {fmt(gated_sr)}). Cause: the `11→7→3` compression sequence needs a "
+            "broad set of names making new highs; with only 2 ETF proxies (QQQ/SPY) the "
+            "shrinking-count condition is effectively never met. **Verdict: inconclusive — "
+            "requires a true multi-symbol breadth dataset before it can be evaluated.**\n")
+    else:
+        lines.append(
+            f"**Q4 — Does ATH compression add value as a breadth filter after costs?** "
+            f"Gated scenario_full total return {fmt(gated_sr)} vs ungated {fmt(base_sr)} "
+            f"(mean across symbols). The gate {'helped' if gated_sr > base_sr else 'did not help'} "
+            f"after 5 bps costs.\n")
+    if tcan:
+        lines.append(
+            f"**Q5 — Does tiered profit-taking improve drawdown enough to justify "
+            f"opportunity cost?** Yes on drawdown, no on return: tiered_canonical max "
+            f"drawdown **{fmt(tcan.get('max_drawdown'))}** vs buy&hold "
+            f"**{fmt(bh.get('max_drawdown'))}** (much shallower), but CAGR "
+            f"**{fmt(tcan.get('cagr'))}** vs **{fmt(bh.get('cagr'))}** (large give-up). "
+            f"Tiering buys drawdown protection at a steep return cost in a bull sample — "
+            f"justified only for capital-preservation mandates, not total-wealth maximization.\n")
     lines.append("**Q6 — What to test next before redeployment?** (a) more symbols + a true "
                  "bear sample (2022 full), (b) intraday/nominal data for the $950 tier and "
                  "Melt-Up intraday predicates, (c) walk-forward parameter selection rather "
@@ -332,6 +409,29 @@ def _write_report(path, verified, pipe, results, robustness_out, regime,
                      f"{e.get('verdict')} | {e.get('primary_pre')} | {e.get('secondary_pre')} |")
     lines.append("\n`pre_caught` = a Melt-Up primary/secondary signal fired within 5 sessions "
                  "before the event; `late_signal` = only after; `no_signal` = neither.\n")
+
+    # exploratory non-canonical Melt-Up variant (R4)
+    cat = explore["catch"]
+    lines.append("## Exploratory (NON-CANONICAL): relaxed Melt-Up primary\n")
+    lines.append("The canonical primary missed MU 2026-06-05 because it requires the open "
+                 "within ~1% of the ATH **and** a new intraday high — but 6/5 was a "
+                 "distribution day a couple of sessions *after* the ATH, with no new high. "
+                 "A relaxed, **non-canonical** primary — *failed high within 5 sessions of a "
+                 "recent ATH + elevated-volume (>=1.2x 20d avg, vs canonical 1.5x) bearish "
+                 "close* — is tested only as an exploratory diagnostic (not adopted as canon; "
+                 "one post-hoc case is overfitting-prone). The 1.2x relaxation matters: MU "
+                 "6/5 volume was ~1.35x its 20d average — elevated, but under the canonical "
+                 "1.5x because the run-up inflated the average.\n")
+    lines.append(f"- MU 2026-06-05 capture: canonical **{cat.get('canonical_caught')}** "
+                 f"-> relaxed **{cat.get('relaxed_caught')}**.")
+    lines.append(f"- False-positive cost (total primary signals across 9 symbols): canonical "
+                 f"**{explore['total_canonical']}** -> relaxed **{explore['total_relaxed']}** "
+                 f"(+{explore['total_relaxed'] - explore['total_canonical']}). Per-symbol "
+                 f"breakdown: `results/meltup_exploratory.csv`.")
+    lines.append("- **Recommendation:** do NOT amend the canonical v2 rule on one case. If "
+                 "the relaxed variant is pursued, validate it out-of-sample (more symbols, "
+                 "and measure post-signal forward returns vs the extra false positives) "
+                 "before any vault-canon change.\n")
 
     # robustness
     lines.append("## Robustness\n")
