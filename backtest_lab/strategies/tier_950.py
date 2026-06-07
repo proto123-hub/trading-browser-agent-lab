@@ -55,7 +55,7 @@ def run_tier950_strategy(
         trig = (close > L) & ~(close.shift(1) > L)
     elif cfg.mode == "tier_950_two_day":
         td = _two_day_cross(close, L)
-        trig = td & ~td.shift(1).fillna(False)
+        trig = td & ~td.shift(1, fill_value=False)
     elif cfg.mode == "tier_950_retest":
         crossed = (close > L)
         retest = crossed & (close.shift(1) <= L) & (close.shift(2) > L)

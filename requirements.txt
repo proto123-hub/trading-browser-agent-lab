@@ -6,6 +6,8 @@
 numpy==2.2.6
 pandas==2.3.3
 pyyaml>=6.0
+# Phase 3 charts (headless Agg backend)
+matplotlib>=3.7
 # Live data source (optional; needs network egress to Yahoo Finance).
 # The default pipeline runs offline on the synthetic source without this.
 yfinance>=0.2.40

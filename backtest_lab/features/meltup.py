@@ -20,12 +20,15 @@ def meltup_features(
     near_ath_pct: float = 0.01,
     heavy_vol_mult: float = 1.5,
     vol_period: int = 20,
+    recent_ath_days: int = 5,
+    relaxed_vol_mult: float = 1.2,
 ) -> pd.DataFrame:
     open_, high, low, close, volume = (
         frame["open"], frame["high"], frame["low"], frame["close"], frame["volume"],
     )
     ath = ath_features(close)
     running_ath = ath["running_ath"]
+    days_since_ath = ath["days_since_ath"]
     prev_close = close.shift(1)
     prev_high = high.shift(1)
     vol_avg = volume.rolling(vol_period).mean()
@@ -46,4 +49,19 @@ def meltup_features(
         open_near_ath & new_intraday_high & heavy_volume & bearish_close
     )
     out["mu_secondary"] = new_intraday_high & bearish_close & down_gap
+
+    # NON-CANONICAL exploratory variant (R4): covers the "failed-high within a few
+    # sessions of a recent ATH" case that the canonical primary misses (e.g. a
+    # distribution day 1-2 sessions after the ATH, where open is no longer within
+    # 1% of the ATH and the day makes no new intraday high). Not a canonical rule;
+    # used only in the exploratory report section.
+    within_recent_ath = (days_since_ath >= 0) & (days_since_ath <= recent_ath_days)
+    failed_new_high = high < running_ath.shift(1)
+    # relaxed uses an "elevated" volume bar (>=1.2x) rather than the canonical
+    # 1.5x: a distribution day after a run-up is often elevated but below 1.5x of
+    # a run-up-inflated 20d average (e.g. MU 6/5 was ~1.35x avg, under 1.5x).
+    relaxed_heavy_volume = volume >= relaxed_vol_mult * vol_avg
+    out["mu_relaxed_primary"] = (
+        within_recent_ath & failed_new_high & relaxed_heavy_volume & bearish_close
+    )
     return out
