@@ -12,3 +12,6 @@ results/summary.csv
 results/scenario_events.csv
 results/breadth_compression.csv
 results/run_provenance.json
+results/strategy_summary.csv
+results/trades.csv
+results/forward_returns.csv

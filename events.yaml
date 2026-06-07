@@ -1,0 +1,33 @@
+# Named market events for Phase 2 strategy annotation and stress reporting.
+#
+# IMPORTANT: these are *annotations only*. They tag real calendar dates so that
+# trade/signal reports can flag named stress events (spec L206, L236). They are
+# NEVER used to fabricate price moves in the synthetic fixture — the synthetic
+# source stays an untouched deterministic generator. Real verification of these
+# events happens in Phase 3 with yfinance data on the true dates.
+named_events:
+  - symbol: MU
+    date: 2026-03-18
+    kind: meltup_stress
+    label: "MU Melt-Up -30% stress case"
+    note: "spec L31, L46, L206 — primary stress event"
+  - symbol: MU
+    date: 2026-06-04
+    kind: distribution_day
+    label: "MU first distribution day"
+    note: "spec L56"
+  - symbol: MU
+    date: 2026-05-01
+    kind: tier_950
+    label: "MU $950 tier trigger reference"
+    note: "spec L32, L185-192 — tier trigger, not entry"
+  - symbol: AVGO
+    date: 2026-06-04
+    kind: earnings_shock
+    label: "AVGO -12.59% earnings shock"
+    note: "spec L57"
+  - symbol: MRVL
+    date: 2026-06-02
+    kind: meltup_climax
+    label: "MRVL +32.5% Melt-Up climax watch"
+    note: "spec L58"
