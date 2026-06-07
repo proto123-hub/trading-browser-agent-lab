@@ -20,11 +20,13 @@ from .base import (
 from .synthetic import SyntheticAdapter
 from .yfinance_adapter import YFinanceAdapter
 from .polygon_adapter import PolygonAdapter
+from .csv_adapter import CSVCacheAdapter
 
 _ADAPTERS = {
     "synthetic": SyntheticAdapter,
     "yfinance": YFinanceAdapter,
     "polygon": PolygonAdapter,
+    "csv": CSVCacheAdapter,
 }
 
 

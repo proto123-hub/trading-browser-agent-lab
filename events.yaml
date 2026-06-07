@@ -17,6 +17,11 @@ named_events:
     label: "MU first distribution day"
     note: "spec L56"
   - symbol: MU
+    date: 2026-06-05
+    kind: meltup_stress
+    label: "MU -13.25% stress case (close 864.01)"
+    note: "second real-time stress case after 3/18; verify Melt-Up pre-catch in Phase 3"
+  - symbol: MU
     date: 2026-05-01
     kind: tier_950
     label: "MU $950 tier trigger reference"

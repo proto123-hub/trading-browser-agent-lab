@@ -1,0 +1,4 @@
+symbol,date,label,primary_pre,secondary_pre,fired_after,verdict
+MU,2026-03-18,MU Melt-Up -30% stress case,True,False,False,pre_caught
+MU,2026-06-05,MU -13.25% stress case (close 864.01),False,False,False,no_signal
+MRVL,2026-06-02,MRVL +32.5% Melt-Up climax watch,True,False,True,pre_caught

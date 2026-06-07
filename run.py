@@ -30,7 +30,22 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--results-dir", default="results")
     p.add_argument("--cache-dir", default="cache")
     p.add_argument("--earnings-csv", default=None)
+    p.add_argument("--phase3", action="store_true",
+                   help="run the Phase 3 real-data analysis + report (source=csv cache)")
     args = p.parse_args(argv)
+
+    if args.phase3:
+        from backtest_lab.phase3 import run_phase3
+        from backtest_lab.data.provenance import ProvenanceError
+        try:
+            rep = run_phase3(results_dir=args.results_dir)
+        except (IntegrityError, ProvenanceError) as exc:
+            print(f"[FAIL-CLOSED] {exc}", file=sys.stderr)
+            return 2
+        print("=== P1 Framework Backtest Lab — Phase 3 complete ===")
+        for k, v in rep.items():
+            print(f"  {k}: {v}")
+        return 0
 
     cfg = RunConfig(
         symbols=[s.strip() for s in args.symbols.split(",") if s.strip()],
