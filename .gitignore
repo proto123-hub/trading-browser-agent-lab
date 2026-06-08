@@ -16,5 +16,6 @@ results/strategy_summary.csv
 results/trades.csv
 results/forward_returns.csv
 results/scenario_forward_returns.csv
+results/breadth_regime.csv
 # Phase 3 keeps the small analysis tables tracked (report-supporting deliverables):
 # parameter_sweep.csv, named_event_verification.csv, robustness_*.csv, framework_v2_traceability.csv
